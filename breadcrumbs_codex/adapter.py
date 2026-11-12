@@ -9,5 +9,11 @@ def _source(path):
     return sessions.sessions(path)
 
 
+def _usage(path):
+    from . import sessions
+    return sessions.usage(path)
+
+
 if ports.layer("codex", __file__):
-    ports.harness("codex", "Codex", ("codex",), ports.mcp_add("codex"), order=30, source=_source)
+    ports.harness("codex", "Codex", ("codex",), ports.mcp_add("codex"), order=30, source=_source,
+                  usage=_usage)
