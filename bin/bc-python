@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+for py in "${BREADCRUMBS_PY:-}" python3.13 python3.12 python3.11 python3; do
+  [ -n "$py" ] || continue
+  if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+    exec "$py" "$@"
+  fi
+done
+echo "breadcrumbs: needs Python 3.11 or newer (set BREADCRUMBS_PY)" >&2
+exit 1

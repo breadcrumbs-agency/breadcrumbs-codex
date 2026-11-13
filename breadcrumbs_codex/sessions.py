@@ -5,7 +5,8 @@ record has "type" and "payload". The record types that this reads:
 
     session_meta    payload.id (the session id), cwd, git.branch, parent_thread_id (a forked or subagent session)
     response_item   payload.type "message" with role "user" or "assistant" (content: parts with a "text"),
-                    "function_call" (name, arguments, call_id), "custom_tool_call" (name, input, call_id), and their
+                    excluding Codex's environment envelope, "function_call" (name, arguments, call_id),
+                    "custom_tool_call" (name, input, call_id), and their
                     results "function_call_output" and "custom_tool_call_output" (call_id, output: a text or a list
                     of text parts). The calls after an assistant message join its row.
 
@@ -45,7 +46,11 @@ def session(path):
         elif record.get("type") != "response_item":
             continue
         elif kind == "message" and item.get("role") in ("user", "assistant"):
-            rows.say(item["role"], text_parts(item.get("content")), ts)
+            text = text_parts(item.get("content"))
+            if (item["role"] == "user" and item.get("internal_chat_message_metadata_passthrough")
+                    and text.startswith("<environment_context>\n") and text.rstrip().endswith("</environment_context>")):
+                continue
+            rows.say(item["role"], text, ts)
         elif kind in CALLS:
             rows.call(item.get("call_id"), item.get("name"), item.get(CALLS[kind]), ts)
         elif kind in RESULTS:

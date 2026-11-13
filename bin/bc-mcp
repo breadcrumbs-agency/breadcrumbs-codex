@@ -1,0 +1,17 @@
+#!/bin/sh
+# Start breadcrumbs for Codex's project-scoped MCP server. A bundled release may place the common layer under lib/;
+# a source checkout may instead use breadcrumbs-common installed in the selected Python environment.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+codex_home="${CODEX_HOME:-$HOME/.codex}"
+export BREADCRUMBS_HOME="${BREADCRUMBS_HOME:-$codex_home/breadcrumbs}"
+export BREADCRUMBS_HERE="${BREADCRUMBS_HERE:-1}"
+if [ -d "$here/lib" ]; then
+  export PYTHONPATH="$here/lib:$here${PYTHONPATH:+:$PYTHONPATH}"
+else
+  export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
+sh "$here/bin/bc-python" -m breadcrumbs_codex.managed ensure || :
+exec sh "$here/bin/bc-python" -m breadcrumbs core mcp

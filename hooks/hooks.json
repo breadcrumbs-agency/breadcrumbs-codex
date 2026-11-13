@@ -1,0 +1,29 @@
+{
+  "description": "Codex memory capture and recall for breadcrumbs.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
+            "timeout": 10,
+            "statusMessage": "Searching breadcrumbs memory"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
+            "timeout": 600,
+            "statusMessage": "Saving this turn to breadcrumbs"
+          }
+        ]
+      }
+    ]
+  }
+}

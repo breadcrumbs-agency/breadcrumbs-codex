@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "breadcrumbs": {
+      "command": "sh",
+      "args": ["./bin/bc-mcp"],
+      "cwd": ".",
+      "env_vars": [
+        "BREADCRUMBS_HOME",
+        "BREADCRUMBS_HERE",
+        "BREADCRUMBS_PY",
+        "CODEX_HOME",
+        "HOME",
+        "PATH",
+        "PYTHONPATH"
+      ]
+    }
+  }
+}

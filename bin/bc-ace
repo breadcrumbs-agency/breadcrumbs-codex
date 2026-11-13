@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+case "${1:-}" in
+  enable|disable|status) exec sh "$root/bin/bc-python" -m breadcrumbs_codex.managed "$@" ;;
+esac
+exec sh "$root/bin/bc-python" -m breadcrumbs_codex.provider "$@"
