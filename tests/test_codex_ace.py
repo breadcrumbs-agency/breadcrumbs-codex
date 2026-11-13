@@ -1,4 +1,4 @@
-"""Keep the Codex request adapter on Hermes's production ACE target."""
+"""The Codex request adapter runs the ACE engine of breadcrumbs-common at its default target."""
 
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,8 +14,8 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from breadcrumbs.ace import request_bytes
-from breadcrumbs.view import ace_requests
+from breadcrumbs.ace_core import request_bytes
+from breadcrumbs_spacegraph.view import ace_requests
 from breadcrumbs_codex.provider import Conversations, Server
 from breadcrumbs_codex.responses import messages
 
@@ -70,7 +70,7 @@ class CodexAce(unittest.TestCase):
             import json
             import tempfile
 
-            from breadcrumbs.ace import request_bytes
+            from breadcrumbs.ace_core import request_bytes
             from breadcrumbs_codex.provider import Conversations
             from breadcrumbs_codex.responses import messages
 
@@ -95,7 +95,8 @@ class CodexAce(unittest.TestCase):
             """)
         root = Path(__file__).resolve().parent.parent
         def run(seed):
-            env = dict(os.environ, PYTHONHASHSEED=str(seed), BREADCRUMBS_ACE_TOKENS="")
+            env = dict(os.environ, PYTHONHASHSEED=str(seed), BREADCRUMBS_ACE_TOKENS="",
+                       PYTHONPATH=os.pathsep.join(p for p in sys.path if p))  # the layers this suite runs with
             return subprocess.check_output([sys.executable, "-c", replay], cwd=root, env=env, text=True,
                                            timeout=45).splitlines()
 

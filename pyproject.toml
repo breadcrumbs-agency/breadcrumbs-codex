@@ -1,20 +1,21 @@
-# One optional accelerator: google-crc32c. The rest of the plugin is standard-library Python.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "breadcrumbs-codex"
 version = "0.4.2"
-description = "The full breadcrumbs memory and provenance plugin ported to Codex."
+description = "Codex adapter for breadcrumbs: the plugin, its hooks, the session source and the ACE provider."
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["google-crc32c>=1.5,<2; platform_python_implementation == 'CPython'"]
+dependencies = ["breadcrumbs-common>=0.4.1,<0.5"]
 
 [project.scripts]
-breadcrumbs = "breadcrumbs.cli:main"
 breadcrumbs-codex-ace = "breadcrumbs_codex.provider:main"
 
 [tool.setuptools]
-packages = ["breadcrumbs", "breadcrumbs_codex"]
+packages = ["breadcrumbs_codex"]
 
 [tool.setuptools.package-data]
-breadcrumbs = ["skills/*/SKILL.md", "view.html", "icon.png"]
 breadcrumbs_codex = ["icon.png"]

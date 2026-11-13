@@ -3,7 +3,7 @@
 import json
 import re
 
-from breadcrumbs.ace import LAYER_NOTE
+from breadcrumbs.ace_core import LAYER_NOTE
 
 
 CALLS = {"function_call", "custom_tool_call", "local_shell_call", "mcp_call", "web_search_call",

@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+if [ -d "$root/lib" ]; then  # a bundle: the layers of breadcrumbs-common under lib/
+  export PYTHONPATH="$root/lib:$root${PYTHONPATH:+:$PYTHONPATH}"
+else
+  export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+fi
 case "${1:-}" in
   enable|disable|status) exec sh "$root/bin/bc-python" -m breadcrumbs_codex.managed "$@" ;;
 esac

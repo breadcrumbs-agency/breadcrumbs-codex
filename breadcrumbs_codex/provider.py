@@ -1,4 +1,4 @@
-"""Loopback Responses provider running the original Hermes ACE on outgoing requests."""
+"""Loopback Responses provider: the ACE engine of breadcrumbs-common on the outgoing requests of Codex."""
 
 import argparse
 from collections import OrderedDict
@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from breadcrumbs import ace
+from breadcrumbs.ace_core import Engine
 from breadcrumbs.history import Refs
 from breadcrumbs.index import Index
 from breadcrumbs.store import Store
@@ -26,10 +26,10 @@ class Conversation:
     def __init__(self, root, sid, model, context_window):
         self.lock = threading.Lock()
         self.users = 0
-        self.engine = ace.Ace()
-        self.engine.on_session_start(sid)
+        self.engine = Engine()
+        self.engine.start_session(sid)
         self.engine.root = str(root)
-        self.engine.update_model(model, context_window)
+        self.engine.use_model(model, context_window)
         self.engine.store = Store(str(root / "store"))
         try:
             ix = self.engine._index = Index(str(root / "index.db"), readonly=True)
@@ -49,11 +49,8 @@ class Conversation:
 
     def observe(self, usage):
         if isinstance(usage, dict) and isinstance(usage.get("input_tokens"), int):
-            self.engine.update_from_response({
-                "prompt_tokens": usage["input_tokens"],
-                "completion_tokens": usage.get("output_tokens"),
-                "total_tokens": usage.get("total_tokens"),
-            })
+            self.engine.counted(usage["input_tokens"], int(usage.get("output_tokens") or 0),
+                                int(usage.get("total_tokens") or 0))
 
 
 class Conversations:

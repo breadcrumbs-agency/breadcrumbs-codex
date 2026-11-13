@@ -8,8 +8,9 @@ import sys
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+for _path in (ROOT, os.path.join(ROOT, "lib")):  # lib/: the layers of a bundle (tools/bundle.py of breadcrumbs)
+    if os.path.isdir(_path) and _path not in sys.path:
+        sys.path.insert(0, _path)
 
 
 def home():
@@ -154,10 +155,10 @@ def recall(query):
         return ""
     query = query[-8000:]
 
-    from breadcrumbs.view import View
+    from breadcrumbs.reader import Reader
 
     try:
-        view = View(home())
+        view = Reader(home())
     except FileNotFoundError:
         return ""
     try:

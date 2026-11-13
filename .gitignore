@@ -1,11 +1,9 @@
-# research notes and downloaded data stay local
-.notes/
 # memory stores (private data) never enter git
-var/
 *.bcpack
 *.bcidx
-bench/data/
-bench/results/private/
+# the layers of a bundle (tools/bundle.py of the breadcrumbs repository): generated, never committed here
+lib/
+BUNDLE.json
 # macOS
 .DS_Store
 # python
@@ -15,14 +13,3 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-.ignore
-# not plugin code: war-room notes, benchmarks and their data, deploy hosts, the retired SpaceGraph tree, design docs
-bench/
-deploy/
-spacegraph/
-doc/*
-!doc/img/
-!doc/DEMO.md
-!doc/index.html
-!doc/.nojekyll
-!doc/video/
