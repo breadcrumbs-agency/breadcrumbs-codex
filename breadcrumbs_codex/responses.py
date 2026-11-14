@@ -9,8 +9,10 @@ from breadcrumbs.ace_core import LAYER_NOTE
 CALLS = {"function_call", "custom_tool_call", "local_shell_call", "mcp_call", "web_search_call",
          "shell_call", "apply_patch_call", "computer_call", "tool_search_call"}
 RESULTS = {"function_call_output", "custom_tool_call_output", "shell_call_output",
-           "local_shell_call_output", "apply_patch_call_output", "computer_call_output", "tool_search_output"}
+           "local_shell_call_output", "apply_patch_call_output", "computer_call_output", "tool_search_output",
+           "mcp_call_output"}
 DEFERRED_TOOLS = re.compile(r"<tools>\s*\nDeferred tool namespaces:\s*\n((?:- [^\n]*\n)+)")
+_BREADCRUMBS_SERVERS = {"breadcrumbs", "mcp__breadcrumbs"}
 
 
 def text(value):
@@ -25,7 +27,9 @@ def text(value):
 def crumb_call(item):
     name = item.get("name", item["type"])
     arguments = item.get("arguments", item.get("input", item.get("action", "")))
-    is_breadcrumb = item.get("namespace") == "mcp__breadcrumbs" or name.startswith("mcp__breadcrumbs__")
+    is_breadcrumb = (item.get("namespace") == "mcp__breadcrumbs"
+                     or item.get("server_label") in _BREADCRUMBS_SERVERS
+                     or name.startswith("mcp__breadcrumbs__"))
     tool = name.rsplit("__", 1)[-1]
     if is_breadcrumb and tool in ("open", "zoom"):
         name = "crumb"
@@ -43,10 +47,23 @@ def crumb_call(item):
 
 def has_breadcrumbs(body):
     def has_zoom(tools):
-        return any(tool.get("name") == "mcp__breadcrumbs__zoom" or
-                   (tool.get("name") == "mcp__breadcrumbs" and
-                    any(entry.get("name") == "zoom" for entry in tool.get("tools", [])))
-                   for tool in tools)
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            if tool.get("name") == "mcp__breadcrumbs__zoom":
+                return True
+            if tool.get("name") == "mcp__breadcrumbs":
+                if any(isinstance(entry, dict) and entry.get("name") == "zoom"
+                       for entry in tool.get("tools", [])):
+                    return True
+            if tool.get("type") == "mcp" and tool.get("server_label") in _BREADCRUMBS_SERVERS:
+                allowed = tool.get("allowed_tools")
+                if allowed is None:
+                    return True
+                if any((entry == "zoom" or (isinstance(entry, dict) and entry.get("name") == "zoom"))
+                       for entry in allowed):
+                    return True
+        return False
 
     if has_zoom(body.get("tools") or []):
         return True
@@ -111,6 +128,8 @@ def messages(body):
 
         if kind in RESULTS:
             call = item.get("call_id")
+            if kind == "mcp_call_output" and not call:
+                call = item.get("id")
             if not step or call not in calls:
                 return None
             calls.remove(call)
@@ -128,7 +147,18 @@ def messages(body):
         if kind in CALLS:
             call = crumb_call(item)
             step.setdefault("tool_calls", []).append(call)
-            if kind != "mcp_call" and item.get("call_id"):
+            if kind == "mcp_call":
+                # Responses API MCP calls carry their own output.  A few
+                # compatible gateways split that into mcp_call_output; keep
+                # either shape indivisible and retain the tool result for ACE.
+                if "output" in item or item.get("error") is not None:
+                    output = item.get("output") if "output" in item else item.get("error")
+                    history.append({"role": "tool", "content": text(output),
+                                    "tool_call_id": call["id"], "wire": [item]})
+                    resolved = True
+                elif call["id"]:
+                    calls.add(call["id"])
+            elif item.get("call_id"):
                 calls.add(call["id"])
         elif kind == "reasoning":
             step["reasoning"] = step.get("reasoning", "") + text(item.get("summary"))

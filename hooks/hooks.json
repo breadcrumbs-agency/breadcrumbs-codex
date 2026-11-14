@@ -1,6 +1,20 @@
 {
   "description": "Codex memory capture and recall for breadcrumbs.",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^compact$",
+        "additionalContextLimit": 4000,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
+            "timeout": 10,
+            "statusMessage": "Restoring breadcrumbs after compaction"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -9,6 +23,31 @@
             "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
             "timeout": 10,
             "statusMessage": "Searching breadcrumbs memory"
+          }
+        ]
+      }
+    ],
+    "PostModelRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
+            "timeout": 10,
+            "statusMessage": "Recording Codex context usage"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/bin/bc-python\" \"${PLUGIN_ROOT}/hooks/bridge.py\"",
+            "timeout": 600,
+            "statusMessage": "Folding older turns into breadcrumbs"
           }
         ]
       }

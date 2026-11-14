@@ -1,6 +1,6 @@
 #!/bin/sh
-# Start breadcrumbs for Codex's project-scoped MCP server. A bundled release may place the common layer under lib/;
-# a source checkout may instead use breadcrumbs-common installed in the selected Python environment.
+# Start breadcrumbs for Codex's project-scoped MCP server. A bundled release places the common layer under lib/;
+# a source checkout discovers the sibling breadcrumbs-common and breadcrumbs-spacegraph folders when present.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -10,7 +10,11 @@ export BREADCRUMBS_HERE="${BREADCRUMBS_HERE:-1}"
 if [ -d "$here/lib" ]; then
   export PYTHONPATH="$here/lib:$here${PYTHONPATH:+:$PYTHONPATH}"
 else
-  export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+  parts=$(CDPATH= cd -- "$here/.." && pwd)
+  source_path="$here"
+  [ -d "$parts/breadcrumbs-spacegraph" ] && source_path="$parts/breadcrumbs-spacegraph:$source_path"
+  [ -d "$parts/breadcrumbs-common" ] && source_path="$parts/breadcrumbs-common:$source_path"
+  export PYTHONPATH="$source_path${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
 sh "$here/bin/bc-python" -m breadcrumbs_codex.managed ensure || :

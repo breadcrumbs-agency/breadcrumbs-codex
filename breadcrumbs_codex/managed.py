@@ -20,6 +20,24 @@ ROOT = Path(__file__).resolve().parent.parent
 PROFILE = "breadcrumbs-ace"
 PROVIDER = "breadcrumbs_ace"
 PROFILE_MARKER = "# Managed by the Breadcrumbs Codex plugin.\n"
+STRATEGY_MARKER = "# Breadcrumbs compaction strategy: "
+STRATEGIES = ("hybrid", "breadcrumbs")
+DEFAULT_STRATEGY = "breadcrumbs"
+HYBRID_COMPACT_LIMIT = 250_000
+# Codex does not document a value that disables model_auto_compact_token_limit.
+# This high-water mark gives ACE the first opportunity while retaining a native
+# fallback for unusually long-context models.
+BREADCRUMBS_COMPACT_LIMIT = 1_000_000
+LEGACY_STRATEGY = "hybrid"
+HARNESS_SETTINGS = (
+    {"key": "strategy", "label": "Compaction strategy", "kind": "choice", "default": DEFAULT_STRATEGY,
+     "options": [{"value": "breadcrumbs", "label": "Breadcrumbs first"},
+                 {"value": "hybrid", "label": "Hybrid / native fallback"}],
+     "doc": "Breadcrumbs-first keeps Codex native compaction at the high-water fallback; hybrid keeps the compatibility threshold."},
+    {"key": "compact_limit", "label": "Native fallback compact limit", "kind": "int",
+     "default": BREADCRUMBS_COMPACT_LIMIT, "min": 1,
+     "doc": "Codex's numeric auto-compaction threshold. This is a fallback; ACE shapes ordinary requests first."},
+)
 DESKTOP_START = "# BEGIN Breadcrumbs ACE routing\n"
 DESKTOP_END = "# END Breadcrumbs ACE routing\n"
 
@@ -52,6 +70,7 @@ class Managed:
         self.desktop = codex_home / "config.toml"
         self.store = Path(os.environ.get("BREADCRUMBS_HOME") or codex_home / "breadcrumbs").expanduser().resolve()
         self.state = codex_home / "breadcrumbs-ace"
+        self.settings_file = self.state / "settings.json"
 
     @contextmanager
     def lock(self):
@@ -74,6 +93,169 @@ class Managed:
             return port, settings["http_headers"][LOCAL_TOKEN]
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f"Invalid Breadcrumbs ACE provider settings in {self.profile}") from error
+
+    def strategy(self):
+        """Return the managed profile's compaction strategy.
+
+        Profiles created before strategies were introduced are the original
+        hybrid behavior, so the missing marker is intentionally backward
+        compatible.
+        """
+        source = read(self.profile)
+        if not source:
+            return None
+        if not source.startswith(PROFILE_MARKER):
+            raise ValueError(f"{self.profile} already exists and is not managed by Breadcrumbs")
+        line = next((line for line in source.splitlines() if line.startswith(STRATEGY_MARKER)), "")
+        # A profile made before the strategy marker existed was the original
+        # hybrid behavior.  Do not silently reinterpret that installed profile.
+        value = line.removeprefix(STRATEGY_MARKER).strip() if line else LEGACY_STRATEGY
+        if value not in STRATEGIES:
+            raise ValueError(f"Invalid Breadcrumbs compaction strategy in {self.profile}")
+        return value
+
+    @staticmethod
+    def compact_limit(strategy, compact_limit):
+        if strategy not in STRATEGIES:
+            raise ValueError("compaction strategy must be hybrid or breadcrumbs")
+        if compact_limit is None:
+            return (BREADCRUMBS_COMPACT_LIMIT if strategy == "breadcrumbs" else HYBRID_COMPACT_LIMIT)
+        if compact_limit <= 0:
+            raise ValueError("native compaction limit must be positive")
+        return compact_limit
+
+    def _profile_values(self):
+        config = self.config()
+        if config is None:
+            return None
+        source = read(self.profile)
+        try:
+            parsed = tomllib.loads(source)
+            limit = int(parsed["model_auto_compact_token_limit"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"Invalid compaction settings in {self.profile}") from error
+        return {"strategy": self.strategy() or LEGACY_STRATEGY, "compact_limit": limit,
+                "port": config[0], "token": config[1]}
+
+    def _preferences(self):
+        try:
+            with self.settings_file.open(encoding="utf-8") as f:
+                value = json.load(f)
+        except (FileNotFoundError, OSError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _save_preferences(self, preferences):
+        if preferences:
+            self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+            write(self.settings_file, json.dumps(preferences, sort_keys=True) + "\n", replace=True)
+        else:
+            self.settings_file.unlink(missing_ok=True)
+
+    def _harness_settings_view(self):
+        """Describe the Codex-specific settings for the common explorer widget."""
+        profile = self._profile_values()
+        preferences = self._preferences()
+        strategy = (profile or {}).get("strategy", preferences.get("strategy", DEFAULT_STRATEGY))
+        values = {
+            "strategy": strategy,
+            "compact_limit": (profile or {}).get("compact_limit", preferences.get("compact_limit",
+                                                                            self.compact_limit(strategy, None))),
+        }
+        result = []
+        for field in HARNESS_SETTINGS:
+            key = field["key"]
+            item = dict(field)
+            item["value"] = values[key]
+            item["source"] = ("saved" if key in preferences else
+                               "profile" if profile and values[key] != field["default"] else
+                               "strategy default" if key == "compact_limit" and values[key] != field["default"] else "default")
+            item["overridden"] = key in preferences or (profile is not None and values[key] != field["default"])
+            result.append(item)
+        return {"key": "codex", "label": "Codex", "description": "Codex-specific compaction routing and fallback settings.",
+                "profile": str(self.profile), "enabled": profile is not None, "fields": result}
+
+    def harness_settings(self, action="get", payload=None):
+        """CRUD for Codex settings, exposed through the common settings widget."""
+        payload = payload if isinstance(payload, dict) else {}
+        with self.lock():
+            active_profile = self._profile_values()
+            preferences = self._preferences()
+            reset_key = None
+            if action == "get":
+                return self._harness_settings_view()
+            if action not in ("set", "delete", "reset"):
+                raise ValueError("unknown Codex settings action: %s" % action)
+            if action == "set":
+                key = payload.get("key")
+                field = next((f for f in HARNESS_SETTINGS if f["key"] == key), None)
+                if field is None:
+                    raise ValueError("unknown Codex setting: %s" % key)
+                value = payload.get("value")
+                if key == "strategy":
+                    if value not in STRATEGIES:
+                        raise ValueError("strategy must be breadcrumbs or hybrid")
+                elif key == "compact_limit":
+                    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                        raise ValueError("compact_limit must be a positive integer")
+                preferences[key] = value
+            elif action == "reset":
+                key = payload.get("key")
+                if key and key not in {field["key"] for field in HARNESS_SETTINGS}:
+                    raise ValueError("unknown Codex setting: %s" % key)
+                reset_key = key or "*"
+                if key:
+                    preferences.pop(key, None)
+                else:
+                    preferences.clear()
+            else:  # delete is the per-field revert operation
+                reset_key = payload.get("key")
+                if reset_key not in {field["key"] for field in HARNESS_SETTINGS}:
+                    raise ValueError("unknown Codex setting: %s" % reset_key)
+                preferences.pop(reset_key, None)
+            self._save_preferences(preferences)
+
+            if active_profile is not None:
+                strategy = preferences.get("strategy", active_profile["strategy"])
+                limit = preferences.get("compact_limit", active_profile["compact_limit"])
+                # A strategy and its native fallback are one pair.  If the
+                # strategy changes without an explicit limit override, use
+                # that strategy's default instead of carrying the old pair
+                # across (hybrid=250k, Breadcrumbs-first=1M).
+                if action == "set" and payload.get("key") == "strategy" and "compact_limit" not in preferences:
+                    limit = self.compact_limit(strategy, None)
+                if reset_key in ("strategy", "*"):
+                    strategy = DEFAULT_STRATEGY
+                    if "compact_limit" not in preferences:
+                        limit = self.compact_limit(strategy, None)
+                if reset_key in ("compact_limit", "*"):
+                    limit = self.compact_limit(strategy, None)
+                if action in ("delete", "reset") and not preferences:
+                    strategy, limit = DEFAULT_STRATEGY, self.compact_limit(DEFAULT_STRATEGY, None)
+                write(self.profile, self.profile_text(active_profile["port"], active_profile["token"], limit, strategy), replace=True)
+                if self.desktop.exists() and self._desktop_state()[1]:
+                    self.enable_desktop()
+                self.start((active_profile["port"], active_profile["token"]))
+            return self._harness_settings_view()
+
+    @staticmethod
+    def profile_text(port, token, compact_limit, strategy):
+        post_turn = ("model_post_turn_compact_threshold_percent = 0\n"
+                     if strategy == "breadcrumbs" else "")
+        return PROFILE_MARKER + f'''model_provider = "{PROVIDER}"
+{STRATEGY_MARKER}{strategy}
+model_auto_compact_token_limit = {compact_limit}
+{post_turn}
+[model_providers.{PROVIDER}]
+name = "Breadcrumbs ACE"
+base_url = "http://127.0.0.1:{port}/v1"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+
+[model_providers.{PROVIDER}.http_headers]
+{LOCAL_TOKEN} = {json.dumps(token)}
+'''
 
     def request(self, config, method="GET", path="/health"):
         port, token = config
@@ -106,24 +288,25 @@ class Managed:
             child.wait()
         raise OSError(f"ACE provider did not start. See {self.state / 'provider.log'}")
 
-    def enable(self, port, compact_limit, desktop=False):
+    def enable(self, port, compact_limit=None, desktop=False, strategy=None):
+        if desktop:
+            self._desktop_state()
         with self.lock():
+            # Validate the desktop target before creating the profile or starting a
+            # provider.  A conflicting default must be a no-op, not a half-installed
+            # ACE profile that only fails when routing is applied at the end.
+            if desktop:
+                self._desktop_state()
             config = self.config()
+            profile_settings = self._profile_values() if config else None
+            preferences = self._preferences()
+            strategy = strategy or (profile_settings or {}).get("strategy") or preferences.get("strategy") or DEFAULT_STRATEGY
+            compact_limit = (compact_limit if compact_limit is not None else
+                             (profile_settings or {}).get("compact_limit") or preferences.get("compact_limit"))
+            compact_limit = self.compact_limit(strategy, compact_limit)
             if config is None:
                 token = secrets.token_urlsafe(32)
-                write(self.profile, PROFILE_MARKER + f'''model_provider = "{PROVIDER}"
-model_auto_compact_token_limit = {compact_limit}
-
-[model_providers.{PROVIDER}]
-name = "Breadcrumbs ACE"
-base_url = "http://127.0.0.1:{port}/v1"
-wire_api = "responses"
-requires_openai_auth = true
-supports_websockets = false
-
-[model_providers.{PROVIDER}.http_headers]
-{LOCAL_TOKEN} = {json.dumps(token)}
-''', replace=False)
+                write(self.profile, self.profile_text(port, token, compact_limit, strategy), replace=False)
                 config = port, token
                 try:
                     self.start(config)
@@ -132,26 +315,70 @@ supports_websockets = false
                     raise
             else:
                 self.start(config)
+                # Keep re-enabling an existing managed profile useful: it is
+                # also the settings update path for the strategy and limit.
+                write(self.profile, self.profile_text(config[0], config[1], compact_limit, strategy),
+                      replace=True)
             if desktop:
                 self.enable_desktop()
 
-    def enable_desktop(self):
+    def _desktop_state(self):
+        """Return (source, already_managed) or fail without changing the desktop config."""
         source = read(self.desktop)
-        if source.count(DESKTOP_START) == source.count(DESKTOP_END) == 2:
-            return
+        managed = source.count(DESKTOP_START) == source.count(DESKTOP_END) == 2
+        if managed:
+            # Keep the idempotent path safe even if an external edit left invalid
+            # TOML behind the managed markers.
+            tomllib.loads(source)
+            return source, True
         settings = tomllib.loads(source)
         if (DESKTOP_START in source or DESKTOP_END in source or "model_provider" in settings
                 or PROVIDER in settings.get("model_providers", {})):
             raise ValueError(f"Existing model provider settings in {self.desktop} would conflict with ACE")
+        return source, False
+
+    def enable_desktop(self):
+        source, managed = self._desktop_state()
+        settings = tomllib.loads(source)
         selection, provider = self.profile.read_text().removeprefix(PROFILE_MARKER).split("\n\n", 1)
         if "model_auto_compact_token_limit" in settings:
-            selection = selection.splitlines()[0]
+            # A pre-existing desktop threshold belongs to the user.  Keep it
+            # outside the managed routing block while still applying the
+            # Breadcrumbs strategy and any post-turn setting.
+            current_selection = ""
+            if managed:
+                _, current_selection, _, _, _ = self._desktop_parts(source)
+            if not managed or "model_auto_compact_token_limit" not in current_selection:
+                selection = "\n".join(line for line in selection.splitlines()
+                                       if not line.startswith("model_auto_compact_token_limit"))
+        if managed:
+            next_source = self._replace_desktop_parts(source, selection, provider)
+            tomllib.loads(next_source)
+            write(self.desktop, next_source, replace=True)
+            return
         if source and not source.endswith("\n"):
             source += "\n"
         next_source = (DESKTOP_START + selection + "\n" + DESKTOP_END + source
                        + DESKTOP_START + "\n" + provider + DESKTOP_END)
         tomllib.loads(next_source)
         write(self.desktop, next_source, replace=True)
+
+    @staticmethod
+    def _desktop_parts(source):
+        """Return the text around the two managed desktop blocks."""
+        before, first_start, rest = source.partition(DESKTOP_START)
+        selection, first_end, rest = rest.partition(DESKTOP_END)
+        middle, second_start, rest = rest.partition(DESKTOP_START)
+        provider, second_end, after = rest.partition(DESKTOP_END)
+        if not (first_start and first_end and second_start and second_end):
+            raise ValueError("Incomplete Breadcrumbs ACE routing")
+        return before, selection, middle, provider, after
+
+    @classmethod
+    def _replace_desktop_parts(cls, source, selection, provider):
+        before, _, middle, _, after = cls._desktop_parts(source)
+        return (before + DESKTOP_START + selection + "\n" + DESKTOP_END + middle
+                + DESKTOP_START + "\n" + provider + DESKTOP_END + after)
 
     def disable_desktop(self):
         source = read(self.desktop)
@@ -207,7 +434,10 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     enable = commands.add_parser("enable", help="create the Codex profile and start ACE")
     enable.add_argument("--port", type=int, default=8767)
-    enable.add_argument("--compact-limit", type=int, default=250_000)
+    enable.add_argument("--strategy", choices=STRATEGIES, default=None,
+                        help="compaction owner: breadcrumbs gives ACE priority (default), hybrid keeps Codex native compaction")
+    enable.add_argument("--compact-limit", type=int, default=None,
+                        help="native Codex fallback threshold; defaults to 1000000 (breadcrumbs) or 250000 (hybrid)")
     enable.add_argument("--desktop", action="store_true", help="also select ACE for new local desktop chats")
     for command in ("status", "disable", "ensure", "serve"):
         commands.add_parser(command)
@@ -215,9 +445,11 @@ def main():
     managed = Managed()
     try:
         if args.command == "enable":
-            if not 0 < args.port < 65536 or args.compact_limit <= 0:
-                parser.error("port and compaction limit must be positive and the port must be below 65536")
-            managed.enable(args.port, args.compact_limit, args.desktop)
+            if not 0 < args.port < 65536:
+                parser.error("port must be positive and below 65536")
+            if args.compact_limit is not None and args.compact_limit <= 0:
+                parser.error("native compaction limit must be positive")
+            managed.enable(args.port, args.compact_limit, args.desktop, args.strategy)
             if args.desktop:
                 print("Breadcrumbs ACE is running and selected for new local Codex chats.")
             else:
@@ -230,6 +462,7 @@ def main():
                 print(f"Breadcrumbs ACE is running on 127.0.0.1:{config[0]}.")
             else:
                 print("Breadcrumbs ACE is configured. The plugin will start it when Codex loads the MCP server.")
+            print(f"Compaction strategy: {managed.strategy()}.")
             if config and tomllib.loads(read(managed.desktop)).get("model_provider") == PROVIDER:
                 print("ACE is the default provider for new local Codex chats.")
             print(f"ACE measurements: {managed.store / 'ace.log'}")

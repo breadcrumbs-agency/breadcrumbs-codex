@@ -112,11 +112,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def error(self, status, message):
         data = json.dumps({"error": {"message": message, "type": "breadcrumbs_provider"}}).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # Codex may cancel a probe after it has received enough of the
+            # response.  The client has gone away; there is no server error to
+            # report and, importantly, no traceback in provider.log.
+            return
 
     def do_GET(self):
         self.handle_request()
@@ -215,7 +221,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         observe(json.loads(data).get("usage"))
                     except (ValueError, AttributeError):
                         pass
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
 
     def stream(self, reply, observe):
         data = []

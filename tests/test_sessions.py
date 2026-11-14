@@ -6,6 +6,7 @@ import os
 import unittest
 
 from breadcrumbs import harness_case, ports
+from breadcrumbs_codex import sessions
 
 STAMP = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc)
 
@@ -80,6 +81,15 @@ class Sessions(harness_case.SourceCase):
     def test_a_broken_line_is_skipped_and_counted(self):
         (_sid, _title, meta, rows), = self.sessions()
         self.assertEqual((meta["skipped"], len(rows)), ("1", 6))
+
+    def test_session_id_and_parent_session_id_are_accepted_as_metadata_aliases(self):
+        path = os.path.join(self.path, "2026", "01", "02", "rollout-alias.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(line("session_meta", {"session_id": "alias-id", "parent_session_id": "parent-id"}) + "\n")
+            f.write(message("user", "an alias-shaped session") + "\n")
+        sid, _title, meta, rows = sessions.session(path)
+        self.assertEqual((sid, meta["parent_session_id"], rows[0]["content"]),
+                         ("alias-id", "parent-id", "an alias-shaped session"))
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ from unittest.mock import patch
 from breadcrumbs.ace_core import request_bytes
 from breadcrumbs_spacegraph.view import ace_requests
 from breadcrumbs_codex.provider import Conversations, Server
-from breadcrumbs_codex.responses import messages
+from breadcrumbs_codex.responses import has_breadcrumbs, messages
 
 
 def user(value):
@@ -153,3 +153,37 @@ class CodexAce(unittest.TestCase):
         rows = messages({"input": items})
         self.assertEqual(rows[2]["wire"], items[1:3])
         self.assertEqual([row["role"] for row in rows], ["system", "user", "assistant", "tool", "tool", "assistant"])
+
+    def test_stateful_and_rich_responses_fail_open_to_the_upstream(self):
+        self.assertIsNone(messages({"previous_response_id": "resp_1", "input": [user("continue")] }))
+        self.assertIsNone(messages({"conversation": "conv_1", "input": [user("continue")] }))
+        self.assertIsNone(messages({"input": [{"type": "message", "role": "user", "content": [
+            {"type": "input_image", "image_url": "https://example.test/image.png"}]}]}))
+        self.assertIsNone(messages({"input": [{"type": "item_reference", "id": "item_1"}]}))
+
+    def test_compaction_items_are_preserved_as_wire_context(self):
+        compact = {"type": "compaction", "id": "cmp_1", "summary": "native summary"}
+        rows = messages({"instructions": "keep the task", "input": [compact, user("continue")]})
+        self.assertEqual(rows[0]["content"], "keep the task")
+        self.assertEqual(rows[1]["wire"], [compact])
+        self.assertEqual(rows[-1]["content"], "continue")
+
+    def test_mcp_call_output_is_kept_and_breadcrumbs_server_is_detected(self):
+        call = {"type": "mcp_call", "id": "mcp_1", "server_label": "mcp__breadcrumbs",
+                "name": "zoom", "arguments": '{"ref":"abc"}', "status": "completed",
+                "output": "exact historical text"}
+        rows = messages({"input": [user("Use memory."), call]})
+        self.assertEqual([row["role"] for row in rows], ["system", "user", "assistant", "tool"])
+        self.assertEqual(rows[2]["tool_calls"][0]["function"]["name"], "crumb")
+        self.assertEqual(rows[3]["content"], "exact historical text")
+        self.assertTrue(has_breadcrumbs({"tools": [{"type": "mcp", "server_label": "mcp__breadcrumbs"}],
+                                         "input": []}))
+
+    def test_split_mcp_call_output_stays_in_the_same_tool_step(self):
+        call = {"type": "mcp_call", "id": "mcp_1", "server_label": "breadcrumbs",
+                "name": "zoom", "arguments": "{}", "status": "calling"}
+        output = {"type": "mcp_call_output", "id": "mcp_out_1", "call_id": "mcp_1",
+                  "output": "exact historical text"}
+        rows = messages({"input": [user("Use memory."), call, output]})
+        self.assertEqual([row["role"] for row in rows], ["system", "user", "assistant", "tool"])
+        self.assertEqual(rows[3]["tool_call_id"], "mcp_1")

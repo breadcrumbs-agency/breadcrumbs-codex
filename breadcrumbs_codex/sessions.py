@@ -3,7 +3,8 @@
 Codex keeps one JSON-lines file for each session: ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl. Every
 record has "type" and "payload". The record types that this reads:
 
-    session_meta    payload.id (the session id), cwd, git.branch, parent_thread_id (a forked or subagent session)
+    session_meta    payload.id or payload.session_id (the session id), cwd, git.branch, parent_thread_id or
+                    parent_session_id (a forked or subagent session)
     response_item   payload.type "message" with role "user" or "assistant" (content: parts with a "text"),
                     excluding Codex's environment envelope, "function_call" (name, arguments, call_id),
                     "custom_tool_call" (name, input, call_id), and their
@@ -56,9 +57,9 @@ def session(path):
         elif kind in RESULTS:
             rows.result(item.get("call_id"), text_parts(item.get("output")), ts)
     git = head.get("git") if isinstance(head.get("git"), dict) else {}
-    return (head.get("id") or os.path.basename(path)[:-len(".jsonl")], "",
+    return (head.get("id") or head.get("session_id") or os.path.basename(path)[:-len(".jsonl")], "",
             meta(skipped=lines.bad, cwd=head.get("cwd"), branch=git.get("branch"),
-                 parent_session_id=head.get("parent_thread_id")), rows.rows)
+                 parent_session_id=head.get("parent_thread_id") or head.get("parent_session_id")), rows.rows)
 
 
 def sessions(path=None):
@@ -75,7 +76,7 @@ def requests(path):
         item = record.get("payload") if isinstance(record.get("payload"), dict) else {}
         info = item.get("info") if record.get("type") == "event_msg" and item.get("type") == "token_count" else None
         if record.get("type") == "session_meta" and prov is None:
-            sid, prov = item.get("id") or sid, item.get("model_provider") or ""
+            sid, prov = item.get("id") or item.get("session_id") or sid, item.get("model_provider") or ""
         elif record.get("type") == "turn_context":
             model = item.get("model") or model
         elif isinstance(info, dict) and isinstance(info.get("last_token_usage"), dict):

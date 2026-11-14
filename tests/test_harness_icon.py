@@ -14,6 +14,8 @@ class CodexIcon(unittest.TestCase):
     def test_codex_gives_a_small_png_icon(self):
         entry = self.entry()
         self.assertEqual(entry["label"], "Codex")
+        self.assertEqual(entry["repository"], "https://github.com/breadcrumbs-agency/breadcrumbs-codex")
+        self.assertEqual(entry["pages"], "https://breadcrumbs-agency.github.io/hermes-breadcrumb-plugin/")
         head, _, body = entry["icon"].partition(",")
         self.assertEqual(head, "data:image/png;base64")
         png = base64.b64decode(body)
