@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "breadcrumbs-codex"
+version = "0.4.2"
+description = "Codex adapter for breadcrumbs: the plugin, its hooks, the session source and the ACE provider."
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["breadcrumbs-common>=0.4.1,<0.5"]
+
+[project.scripts]
+breadcrumbs-codex-ace = "breadcrumbs_codex.provider:main"
+
+[tool.setuptools]
+packages = ["breadcrumbs_codex"]
+
+[tool.setuptools.package-data]
+breadcrumbs_codex = ["icon.png"]

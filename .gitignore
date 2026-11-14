@@ -1,0 +1,15 @@
+# memory stores (private data) never enter git
+*.bcpack
+*.bcidx
+# the layers of a bundle (tools/bundle.py of the breadcrumbs repository): generated, never committed here
+lib/
+BUNDLE.json
+# macOS
+.DS_Store
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+build/
+dist/

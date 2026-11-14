@@ -1,0 +1,25 @@
+{
+  "name": "breadcrumbs",
+  "version": "0.4.2",
+  "description": "Content-addressed memory and an optional ACE context provider for Codex.",
+  "author": { "name": "breadcrumbs-agency" },
+  "homepage": "https://github.com/breadcrumbs-agency/breadcrumbs-codex",
+  "repository": "https://github.com/breadcrumbs-agency/breadcrumbs-codex",
+  "license": "MIT",
+  "keywords": ["memory", "provenance", "context", "codex"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "breadcrumbs",
+    "shortDescription": "Exact-provenance memory and ACE for Codex",
+    "longDescription": "Search and open Codex memories by their exact source address. The optional ACE provider folds older turns into recallable breadcrumbs and keeps recent context intact.",
+    "developerName": "breadcrumbs-agency",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/breadcrumbs-agency/breadcrumbs-codex",
+    "composerIcon": "./assets/codex.png",
+    "logo": "./assets/codex.png",
+    "brandColor": "#4F46E5"
+  }
+}
