@@ -29,15 +29,26 @@ HYBRID_COMPACT_LIMIT = 250_000
 # fallback for unusually long-context models.
 BREADCRUMBS_COMPACT_LIMIT = 1_000_000
 LEGACY_STRATEGY = "hybrid"
+DEFAULT_THRESHOLD_TOKENS = 150_000
+DEFAULT_FOLD_TOKENS = 5_000
 HARNESS_SETTINGS = (
-    {"key": "strategy", "label": "Compaction strategy", "kind": "choice", "default": DEFAULT_STRATEGY,
-     "options": [{"value": "breadcrumbs", "label": "Breadcrumbs first"},
-                 {"value": "hybrid", "label": "Hybrid / native fallback"}],
-     "doc": "Breadcrumbs-first keeps Codex native compaction at the high-water fallback; hybrid keeps the compatibility threshold."},
+    {"key": "native_compaction", "label": "Codex native compaction", "kind": "bool", "default": False,
+     "doc": "On: Codex compacts at its own threshold (the compact limit below, 250,000 by default) and ACE only adds a layer. "
+            "Off: ACE shapes the requests first, Codex's turn-end compaction is off, and its auto-compactor stays as a "
+            "high-water fallback (Codex has no value that turns it off). Applies to a chat started after the change."},
     {"key": "compact_limit", "label": "Native fallback compact limit", "kind": "int",
      "default": BREADCRUMBS_COMPACT_LIMIT, "min": 1,
-     "doc": "Codex's numeric auto-compaction threshold. This is a fallback; ACE shapes ordinary requests first."},
+     "doc": "Codex's numeric auto-compaction threshold, in tokens: the fallback when native compaction is off. "
+            "Applies to a chat started after the change."},
+    {"key": "threshold_tokens", "label": "Hook threshold", "kind": "int", "default": DEFAULT_THRESHOLD_TOKENS, "min": 1,
+     "doc": "The size in tokens at which the hooks mark a usage line over_threshold. A diagnostic: it does not make Codex compact. "
+            "The environment variable BREADCRUMBS_CODEX_THRESHOLD_TOKENS wins."},
+    {"key": "fold_tokens", "label": "PreCompact layer size", "kind": "int", "default": DEFAULT_FOLD_TOKENS, "min": 1000,
+     "doc": "The size in tokens of the layer that PreCompact prepares before Codex's own compaction. "
+            "The environment variable BREADCRUMBS_CODEX_FOLD_TOKENS wins."},
 )
+# The settings that are not in the profile: the hooks read them from settings.json beside the lock.
+HOOK_SETTINGS = ("threshold_tokens", "fold_tokens")
 DESKTOP_START = "# BEGIN Breadcrumbs ACE routing\n"
 DESKTOP_END = "# END Breadcrumbs ACE routing\n"
 
@@ -158,22 +169,33 @@ class Managed:
         preferences = self._preferences()
         strategy = (profile or {}).get("strategy", preferences.get("strategy", DEFAULT_STRATEGY))
         values = {
-            "strategy": strategy,
+            "native_compaction": strategy == "hybrid",
             "compact_limit": (profile or {}).get("compact_limit", preferences.get("compact_limit",
                                                                             self.compact_limit(strategy, None))),
+            "threshold_tokens": preferences.get("threshold_tokens", DEFAULT_THRESHOLD_TOKENS),
+            "fold_tokens": preferences.get("fold_tokens", DEFAULT_FOLD_TOKENS),
         }
+        stored = {"native_compaction": "strategy"}
         result = []
         for field in HARNESS_SETTINGS:
             key = field["key"]
             item = dict(field)
             item["value"] = values[key]
-            item["source"] = ("saved" if key in preferences else
-                               "profile" if profile and values[key] != field["default"] else
+            saved = stored.get(key, key) in preferences
+            item["source"] = ("saved" if saved else
+                               "profile" if profile and key in ("native_compaction", "compact_limit")
+                                            and values[key] != field["default"] else
                                "strategy default" if key == "compact_limit" and values[key] != field["default"] else "default")
-            item["overridden"] = key in preferences or (profile is not None and values[key] != field["default"])
+            item["overridden"] = saved or (profile is not None and key in ("native_compaction", "compact_limit")
+                                           and values[key] != field["default"])
             result.append(item)
-        return {"key": "codex", "label": "Codex", "description": "Codex-specific compaction routing and fallback settings.",
+        return {"key": "codex", "label": "Codex", "description": "Codex-specific compaction routing, fallback and hook settings.",
                 "profile": str(self.profile), "enabled": profile is not None, "fields": result}
+
+    @staticmethod
+    def _stored_key(key):
+        """The key of settings.json for a field of the widget (the widget's compaction switch is the stored strategy)."""
+        return "strategy" if key == "native_compaction" else key
 
     def harness_settings(self, action="get", payload=None):
         """CRUD for Codex settings, exposed through the common settings widget."""
@@ -186,36 +208,46 @@ class Managed:
                 return self._harness_settings_view()
             if action not in ("set", "delete", "reset"):
                 raise ValueError("unknown Codex settings action: %s" % action)
+            known = {field["key"] for field in HARNESS_SETTINGS} | {"strategy"}
             if action == "set":
                 key = payload.get("key")
                 field = next((f for f in HARNESS_SETTINGS if f["key"] == key), None)
-                if field is None:
+                if field is None and key != "strategy":
                     raise ValueError("unknown Codex setting: %s" % key)
                 value = payload.get("value")
-                if key == "strategy":
+                if key == "native_compaction":
+                    if not isinstance(value, bool):
+                        raise ValueError("native_compaction must be true or false")
+                    key, value = "strategy", "hybrid" if value else "breadcrumbs"
+                    payload = dict(payload, key=key)
+                elif key == "strategy":
                     if value not in STRATEGIES:
                         raise ValueError("strategy must be breadcrumbs or hybrid")
-                elif key == "compact_limit":
-                    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-                        raise ValueError("compact_limit must be a positive integer")
+                elif key in ("compact_limit", "threshold_tokens", "fold_tokens"):
+                    floor = field.get("min", 1)
+                    if isinstance(value, bool) or not isinstance(value, int) or value < floor:
+                        raise ValueError("%s must be a whole number of %d or more" % (key, floor))
                 preferences[key] = value
             elif action == "reset":
                 key = payload.get("key")
-                if key and key not in {field["key"] for field in HARNESS_SETTINGS}:
+                if key and key not in known:
                     raise ValueError("unknown Codex setting: %s" % key)
+                key = self._stored_key(key) if key else key
                 reset_key = key or "*"
                 if key:
                     preferences.pop(key, None)
                 else:
                     preferences.clear()
             else:  # delete is the per-field revert operation
-                reset_key = payload.get("key")
-                if reset_key not in {field["key"] for field in HARNESS_SETTINGS}:
-                    raise ValueError("unknown Codex setting: %s" % reset_key)
+                reset_key = self._stored_key(payload.get("key"))
+                if reset_key not in known:
+                    raise ValueError("unknown Codex setting: %s" % payload.get("key"))
                 preferences.pop(reset_key, None)
             self._save_preferences(preferences)
 
-            if active_profile is not None:
+            # The hook settings are read from settings.json by the hooks: the profile and the provider stay as they are.
+            changed = payload.get("key") if action == "set" else reset_key
+            if active_profile is not None and (changed in (None, "*") or changed not in HOOK_SETTINGS):
                 strategy = preferences.get("strategy", active_profile["strategy"])
                 limit = preferences.get("compact_limit", active_profile["compact_limit"])
                 # A strategy and its native fallback are one pair.  If the
@@ -230,7 +262,7 @@ class Managed:
                         limit = self.compact_limit(strategy, None)
                 if reset_key in ("compact_limit", "*"):
                     limit = self.compact_limit(strategy, None)
-                if action in ("delete", "reset") and not preferences:
+                if action in ("delete", "reset") and not any(k in preferences for k in ("strategy", "compact_limit")):
                     strategy, limit = DEFAULT_STRATEGY, self.compact_limit(DEFAULT_STRATEGY, None)
                 write(self.profile, self.profile_text(active_profile["port"], active_profile["token"], limit, strategy), replace=True)
                 if self.desktop.exists() and self._desktop_state()[1]:

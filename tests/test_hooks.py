@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class CodexHooks(unittest.TestCase):
     def env(self, directory, **extra):
         values = {
+            "CODEX_HOME": str(Path(directory)),
             "BREADCRUMBS_HOME": str(Path(directory) / "breadcrumbs"),
             "PLUGIN_DATA": str(Path(directory) / "plugin-data"),
         }
@@ -47,6 +48,26 @@ class CodexHooks(unittest.TestCase):
             self.assertEqual(bridge.threshold_tokens(), 1)
         with patch.dict(os.environ, {"BREADCRUMBS_CODEX_THRESHOLD_TOKENS": "not-a-number"}):
             self.assertEqual(bridge.threshold_tokens(), 150000)
+
+    def test_saved_hook_settings_supply_thresholds_but_environment_wins(self):
+        with tempfile.TemporaryDirectory() as directory, self.env(directory):
+            settings = Path(directory) / "breadcrumbs-ace" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(json.dumps({"threshold_tokens": 12345, "fold_tokens": 2345}))
+            self.assertEqual(bridge.threshold_tokens(), 12345)
+            self.assertEqual(bridge.fold_tokens(), 2345)
+            with patch.dict(os.environ, {"BREADCRUMBS_CODEX_THRESHOLD_TOKENS": "34567",
+                                         "BREADCRUMBS_CODEX_FOLD_TOKENS": "4567"}):
+                self.assertEqual(bridge.threshold_tokens(), 34567)
+                self.assertEqual(bridge.fold_tokens(), 4567)
+
+    def test_saved_fold_budget_is_clamped_and_invalid_saved_values_fall_back(self):
+        with tempfile.TemporaryDirectory() as directory, self.env(directory):
+            settings = Path(directory) / "breadcrumbs-ace" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(json.dumps({"threshold_tokens": 0, "fold_tokens": "not-a-number"}))
+            self.assertEqual(bridge.threshold_tokens(), 1)
+            self.assertEqual(bridge.fold_tokens(), 5000)
 
     def test_post_model_usage_is_saved_but_child_usage_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory, self.env(directory, BREADCRUMBS_CODEX_THRESHOLD_TOKENS=1000):

@@ -94,18 +94,50 @@ class ManagedProvider(unittest.TestCase):
             initial = manager.harness_settings()
             self.assertFalse(initial["enabled"])
             self.assertEqual({field["key"]: field["value"] for field in initial["fields"]},
-                             {"strategy": managed.DEFAULT_STRATEGY, "compact_limit": managed.BREADCRUMBS_COMPACT_LIMIT})
+                             {"native_compaction": False, "compact_limit": managed.BREADCRUMBS_COMPACT_LIMIT,
+                              "threshold_tokens": 150000, "fold_tokens": 5000})
 
             manager.harness_settings("set", {"key": "strategy", "value": "hybrid"})
             manager.harness_settings("set", {"key": "compact_limit", "value": 333000})
-            self.assertEqual(json.loads(manager.settings_file.read_text()), {"compact_limit": 333000, "strategy": "hybrid"})
+            manager.harness_settings("set", {"key": "threshold_tokens", "value": 123000})
+            manager.harness_settings("set", {"key": "fold_tokens", "value": 7000})
+            self.assertEqual(json.loads(manager.settings_file.read_text()),
+                             {"compact_limit": 333000, "fold_tokens": 7000, "strategy": "hybrid",
+                              "threshold_tokens": 123000})
             manager.harness_settings("delete", {"key": "compact_limit"})
+            manager.harness_settings("delete", {"key": "threshold_tokens"})
             values = {field["key"]: field["value"] for field in manager.harness_settings()["fields"]}
-            self.assertEqual(values, {"strategy": "hybrid", "compact_limit": managed.HYBRID_COMPACT_LIMIT})
+            self.assertEqual(values, {"native_compaction": True, "compact_limit": managed.HYBRID_COMPACT_LIMIT,
+                                      "threshold_tokens": 150000, "fold_tokens": 7000})
             manager.harness_settings("reset")
             self.assertFalse(manager.settings_file.exists())
             values = {field["key"]: field["value"] for field in manager.harness_settings()["fields"]}
-            self.assertEqual(values, {"strategy": managed.DEFAULT_STRATEGY, "compact_limit": managed.BREADCRUMBS_COMPACT_LIMIT})
+            self.assertEqual(values, {"native_compaction": False, "compact_limit": managed.BREADCRUMBS_COMPACT_LIMIT,
+                                      "threshold_tokens": 150000, "fold_tokens": 5000})
+
+    def test_native_compaction_switch_is_the_public_alias_for_strategy(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"CODEX_HOME": directory}):
+            manager = self.make()
+            manager.harness_settings("set", {"key": "native_compaction", "value": True})
+            self.assertEqual(json.loads(manager.settings_file.read_text()), {"strategy": "hybrid"})
+            self.assertTrue(next(field for field in manager.harness_settings()["fields"]
+                                 if field["key"] == "native_compaction")["value"])
+
+            manager.harness_settings("set", {"key": "native_compaction", "value": False})
+            self.assertEqual(json.loads(manager.settings_file.read_text()), {"strategy": "breadcrumbs"})
+            self.assertFalse(next(field for field in manager.harness_settings()["fields"]
+                                  if field["key"] == "native_compaction")["value"])
+
+    def test_hook_settings_do_not_restart_an_active_provider(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"CODEX_HOME": directory}):
+            manager = self.make()
+            with patch.object(manager, "start") as start:
+                manager.enable(8767, strategy="breadcrumbs")
+                manager.harness_settings("set", {"key": "threshold_tokens", "value": 175000})
+                manager.harness_settings("set", {"key": "fold_tokens", "value": 6500})
+            self.assertEqual(start.call_count, 1)
+            self.assertEqual(json.loads(manager.settings_file.read_text()),
+                             {"fold_tokens": 6500, "threshold_tokens": 175000})
 
     def test_setting_strategy_on_an_active_profile_updates_its_fallback_pair(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"CODEX_HOME": directory}):

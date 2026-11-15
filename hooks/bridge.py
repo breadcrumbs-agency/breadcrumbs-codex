@@ -155,13 +155,37 @@ def row_hash(row):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def saved_hook_settings():
+    """Read Codex-specific hook settings saved by the explorer, if present."""
+    codex_home = os.path.expanduser(os.environ.get("CODEX_HOME", "~/.codex"))
+    path = os.path.join(codex_home, "breadcrumbs-ace", "settings.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = json.load(f)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def hook_int_setting(env_name, setting_key, default, minimum):
+    """Resolve an integer hook setting: explicit environment wins over saved UI state."""
+    raw = os.environ.get(env_name)
+    if raw in (None, ""):
+        raw = saved_hook_settings().get(setting_key, default)
+    try:
+        return max(minimum, int(raw))
+    except (TypeError, ValueError):
+        return default
+
+
 def threshold_tokens():
     """The diagnostic threshold shown in hook state; Codex remains the authority for compaction."""
-    raw = os.environ.get("BREADCRUMBS_CODEX_THRESHOLD_TOKENS", "150000")
-    try:
-        return max(1, int(raw))
-    except (TypeError, ValueError):
-        return 150000
+    return hook_int_setting("BREADCRUMBS_CODEX_THRESHOLD_TOKENS", "threshold_tokens", 150000, 1)
+
+
+def fold_tokens():
+    """The bounded token target for the supplemental ACE layer."""
+    return hook_int_setting("BREADCRUMBS_CODEX_FOLD_TOKENS", "fold_tokens", 5000, 1000)
 
 
 def usage_fields(count):
@@ -255,10 +279,7 @@ def prepare_fold(event):
         from breadcrumbs.cli import open_all
 
         root = home()
-        try:
-            target = max(1000, int(os.environ.get("BREADCRUMBS_CODEX_FOLD_TOKENS", "5000")))
-        except (TypeError, ValueError):
-            target = 5000
+        target = fold_tokens()
         engine = Engine(target_tokens=target)
         layer, items = "", []
         try:

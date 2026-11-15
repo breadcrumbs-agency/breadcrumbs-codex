@@ -87,6 +87,10 @@ The provider handles full HTTP Responses and Responses Lite requests with Breadc
 (`previous_response_id` or `conversation`), native compaction, and requests with media or unknown item types through
 as supplied.
 
+The Codex settings section also exposes the hook watch threshold and supplemental fold budget. Those values are stored
+in `~/.codex/breadcrumbs-ace/settings.json` and are read by each hook invocation; an explicitly set
+`BREADCRUMBS_CODEX_THRESHOLD_TOKENS` or `BREADCRUMBS_CODEX_FOLD_TOKENS` environment variable takes precedence.
+
 ## Install the plugin
 
 Codex runs a plugin from one folder, so build the bundle (this part with its layers under `lib/`) and install that
