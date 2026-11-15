@@ -1,0 +1,3 @@
+# Managed by the Breadcrumbs Codex plugin: the lead lane (orchestrate). Generated from lanes.json.
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"

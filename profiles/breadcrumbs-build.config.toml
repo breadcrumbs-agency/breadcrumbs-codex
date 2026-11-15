@@ -1,0 +1,3 @@
+# Managed by the Breadcrumbs Codex plugin: the build lane (pinpoint, scaffold). Generated from lanes.json.
+model = "gpt-6-astra"
+model_reasoning_effort = "ultra"

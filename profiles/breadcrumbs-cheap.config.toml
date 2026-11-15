@@ -1,0 +1,3 @@
+# Managed by the Breadcrumbs Codex plugin: the cheap lane (dispatch, fan-out). Generated from lanes.json.
+model = "gpt-6-luna"
+model_reasoning_effort = "low"
