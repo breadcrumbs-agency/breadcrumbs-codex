@@ -25,4 +25,4 @@ if ports.layer("codex", __file__):
     ports.harness("codex", "Codex", ("codex",), ports.mcp_add("codex"), order=30, source=_source,
                   usage=_usage, icon=ports.image(__file__, "icon.png"), settings=_settings,
                   repository="https://github.com/breadcrumbs-agency/breadcrumbs-codex",
-                  pages="https://breadcrumbs-agency.github.io/hermes-breadcrumb-plugin/")
+                  pages="https://breadcrumbs-agency.github.io/breadcrumbs-hermes/")
